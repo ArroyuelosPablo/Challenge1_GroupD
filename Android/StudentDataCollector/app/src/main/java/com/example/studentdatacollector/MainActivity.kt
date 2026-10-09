@@ -7,6 +7,7 @@ import android.os.Bundle
 import android.os.Process
 import android.provider.Settings
 import android.widget.Toast
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,7 +20,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.studentdatacollector.ui.theme.StudentDataCollectorTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -53,6 +57,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onRefresh = { refreshToday() },
                         onExport = { exportAll() },
+                        onTestSupabase = { testSupabase() },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -147,6 +152,36 @@ class MainActivity : ComponentActivity() {
             }
         }.start()
     }
+
+    private fun testSupabase() {
+        if (busy) return
+        busy = true
+        statusMessage = "Database trial…"
+        lifecycleScope.launch(Dispatchers.IO) {
+            val testRecord = SupabaseRepository.UsageSessionRecord(
+                app_name = "App Trial",
+                package_name = "com.example.test",
+                start_time = Csv.time(System.currentTimeMillis() - 60000),
+                end_time = Csv.time(System.currentTimeMillis()),
+                duration_seconds = 60,
+                created_at = Csv.time(System.currentTimeMillis())
+            )
+
+            val result = SupabaseRepository.insertUsageSession(testRecord)
+
+            runOnUiThread {
+                busy = false
+                result.onSuccess {
+                    statusMessage = "✅ Supabase: Done"
+                    Toast.makeText(this@MainActivity, "¡Done!", Toast.LENGTH_LONG).show()
+                }.onFailure { error ->
+                    Log.e("SupabaseTest", "Error inserting ", error)
+                    statusMessage = "❌ Error Supabase: ${error.message}"
+                    Toast.makeText(this@MainActivity, "Error: ${error.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -160,6 +195,7 @@ fun ExplorerScreen(
     onGrantNotifications: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
+    onTestSupabase: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -194,6 +230,10 @@ fun ExplorerScreen(
             Button(onClick = onExport, enabled = hasUsageAccess && !busy) {
                 Text("Export (last 7 days)")
             }
+        }
+
+        Button(onClick = onTestSupabase, enabled = !busy) {
+            Text("Send to Database")
         }
 
         if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
