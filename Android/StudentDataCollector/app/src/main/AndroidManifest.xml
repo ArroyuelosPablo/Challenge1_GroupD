@@ -10,7 +10,7 @@
     <!-- Connection type (Wi-Fi / mobile). Granted automatically, no pop-up -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <!-- Connection to the Internet PABLO-->
+    <!-- Upload sessions to Supabase. Granted automatically, no pop-up -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Lets the app read other apps' names and find the home screen app -->

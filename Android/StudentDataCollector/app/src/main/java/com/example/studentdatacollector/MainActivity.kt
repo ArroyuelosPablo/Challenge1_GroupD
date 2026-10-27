@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.os.Process
 import android.provider.Settings
 import android.widget.Toast
-import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,10 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
-import androidx.lifecycle.lifecycleScope
 import com.example.studentdatacollector.ui.theme.StudentDataCollectorTheme
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -36,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private var todaySummary by mutableStateOf("")
     private var statusMessage by mutableStateOf("")
     private var busy by mutableStateOf(false)
+    private var syncStatus by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,7 +54,15 @@ class MainActivity : ComponentActivity() {
                         },
                         onRefresh = { refreshToday() },
                         onExport = { exportAll() },
-                        onTestSupabase = { testSupabase() },
+                        syncStatus = syncStatus,
+                        onSyncNow = {
+                            SyncScheduler.syncNow(this@MainActivity)
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Sync started. Press Refresh in a few seconds to see the result.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -71,7 +76,12 @@ class MainActivity : ComponentActivity() {
         hasUsageAccess = checkUsageAccess()
         hasNotificationAccess =
             NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
-        if (hasUsageAccess) refreshToday()
+        if (hasUsageAccess) {
+            refreshToday()
+            // Automatic upload to Supabase every SYNC_INTERVAL_HOURS
+            SyncScheduler.schedule(this)
+        }
+        syncStatus = SyncState.describe(this)
     }
 
     private fun checkUsageAccess(): Boolean {
@@ -110,6 +120,7 @@ class MainActivity : ComponentActivity() {
             }
             runOnUiThread {
                 todaySummary = text
+                syncStatus = SyncState.describe(ctx)
                 busy = false
             }
         }.start()
@@ -152,36 +163,6 @@ class MainActivity : ComponentActivity() {
             }
         }.start()
     }
-
-    private fun testSupabase() {
-        if (busy) return
-        busy = true
-        statusMessage = "Database trial…"
-        lifecycleScope.launch(Dispatchers.IO) {
-            val testRecord = SupabaseRepository.UsageSessionRecord(
-                app_name = "App Trial",
-                package_name = "com.example.test",
-                start_time = Csv.time(System.currentTimeMillis() - 60000),
-                end_time = Csv.time(System.currentTimeMillis()),
-                duration_seconds = 60,
-                created_at = Csv.time(System.currentTimeMillis())
-            )
-
-            val result = SupabaseRepository.insertUsageSession(testRecord)
-
-            runOnUiThread {
-                busy = false
-                result.onSuccess {
-                    statusMessage = "✅ Supabase: Done"
-                    Toast.makeText(this@MainActivity, "¡Done!", Toast.LENGTH_LONG).show()
-                }.onFailure { error ->
-                    Log.e("SupabaseTest", "Error inserting ", error)
-                    statusMessage = "❌ Error Supabase: ${error.message}"
-                    Toast.makeText(this@MainActivity, "Error: ${error.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-    }
 }
 
 @Composable
@@ -195,7 +176,8 @@ fun ExplorerScreen(
     onGrantNotifications: () -> Unit,
     onRefresh: () -> Unit,
     onExport: () -> Unit,
-    onTestSupabase: () -> Unit,
+    syncStatus: String,
+    onSyncNow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -232,12 +214,16 @@ fun ExplorerScreen(
             }
         }
 
-        Button(onClick = onTestSupabase, enabled = !busy) {
-            Text("Send to Database")
-        }
-
         if (busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         if (statusMessage.isNotEmpty()) Text(statusMessage)
+
+        HorizontalDivider()
+
+        Text("Supabase sync", style = MaterialTheme.typography.titleMedium)
+        Text(syncStatus)
+        OutlinedButton(onClick = onSyncNow, enabled = hasUsageAccess) {
+            Text("Sync now")
+        }
     }
 }
 
@@ -252,4 +238,3 @@ fun PermissionRow(label: String, granted: Boolean, onGrant: () -> Unit) {
         if (!granted) Button(onClick = onGrant) { Text("Grant") }
     }
 }
-
