@@ -59,7 +59,7 @@ object SyncScheduler {
 
     fun schedule(context: Context) {
         val request = PeriodicWorkRequestBuilder<SyncWorker>(
-            SupabaseConfig.SYNC_INTERVAL_HOURS, TimeUnit.HOURS
+            SupabaseConfig.SYNC_INTERVAL_MINUTES, TimeUnit.MINUTES
         )
             .setConstraints(constraints)
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.MINUTES)
@@ -140,14 +140,17 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
                 put(SupabaseConfig.COL_START, Csv.time(s.start))
                 put(SupabaseConfig.COL_END, Csv.time(s.end))
                 put(SupabaseConfig.COL_DURATION, (s.end - s.start) / 1000)
-                put(SupabaseConfig.COL_DATE, Csv.date(s.start))
+                // Note: activity_date is a GENERATED ALWAYS column in PostgreSQL, so Supabase calculates it automatically.
             })
         }
 
         val query = if (SupabaseConfig.ON_CONFLICT.isNotEmpty()) {
             "?on_conflict=${SupabaseConfig.ON_CONFLICT}"
         } else ""
-        val url = URL("${SupabaseConfig.URL.trimEnd('/')}/rest/v1/${SupabaseConfig.TABLE}$query")
+        val baseUrl = SupabaseConfig.URL.trimEnd('/')
+            .removeSuffix("/rest/v1")
+            .trimEnd('/')
+        val url = URL("$baseUrl/rest/v1/${SupabaseConfig.TABLE}$query")
 
         val conn = url.openConnection() as HttpURLConnection
         try {
@@ -157,10 +160,7 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
             conn.doOutput = true
             conn.setRequestProperty("Content-Type", "application/json")
             conn.setRequestProperty("apikey", SupabaseConfig.PUBLIC_KEY)
-            // Legacy anon keys are JWTs ("eyJ...") and also go in the Authorization header
-            if (SupabaseConfig.PUBLIC_KEY.startsWith("eyJ")) {
-                conn.setRequestProperty("Authorization", "Bearer ${SupabaseConfig.PUBLIC_KEY}")
-            }
+            conn.setRequestProperty("Authorization", "Bearer ${SupabaseConfig.PUBLIC_KEY}")
             val prefer = if (SupabaseConfig.ON_CONFLICT.isNotEmpty()) {
                 "return=minimal,resolution=ignore-duplicates"
             } else "return=minimal"

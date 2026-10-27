@@ -30,6 +30,7 @@ class PhoneListenerService : NotificationListenerService() {
         override fun onReceive(context: Context, intent: Intent) {
             val trigger = when (intent.action) {
                 Intent.ACTION_SCREEN_ON -> "screen_on"
+                Intent.ACTION_SCREEN_OFF -> "screen_off"
                 Intent.ACTION_USER_PRESENT -> "unlock"
                 else -> return
             }
@@ -37,6 +38,12 @@ class PhoneListenerService : NotificationListenerService() {
                 this@PhoneListenerService, CONTEXT_FILE, CONTEXT_HEADER,
                 ContextReader.snapshotRow(this@PhoneListenerService, trigger)
             )
+
+            // When the user locks/turns off the screen, the current app session finishes.
+            // Trigger an immediate background sync to upload completed sessions.
+            if (intent.action == Intent.ACTION_SCREEN_OFF) {
+                SyncScheduler.syncNow(this@PhoneListenerService)
+            }
         }
     }
 
@@ -51,6 +58,7 @@ class PhoneListenerService : NotificationListenerService() {
         if (!receiverRegistered) {
             val filter = IntentFilter().apply {
                 addAction(Intent.ACTION_SCREEN_ON)
+                addAction(Intent.ACTION_SCREEN_OFF)
                 addAction(Intent.ACTION_USER_PRESENT)
             }
             ContextCompat.registerReceiver(

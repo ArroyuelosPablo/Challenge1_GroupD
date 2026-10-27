@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
             NotificationManagerCompat.getEnabledListenerPackages(this).contains(packageName)
         if (hasUsageAccess) {
             refreshToday()
-            // Automatic upload to Supabase every SYNC_INTERVAL_HOURS
+            // Automatic upload to Supabase every SYNC_INTERVAL_MINUTES
             SyncScheduler.schedule(this)
         }
         syncStatus = SyncState.describe(this)
