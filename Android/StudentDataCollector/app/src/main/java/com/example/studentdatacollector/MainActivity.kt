@@ -56,12 +56,14 @@ class MainActivity : ComponentActivity() {
                         onExport = { exportAll() },
                         syncStatus = syncStatus,
                         onSyncNow = {
+                            syncStatus = "Syncing in background..."
                             SyncScheduler.syncNow(this@MainActivity)
-                            Toast.makeText(
-                                this@MainActivity,
-                                "Sync started. Press Refresh in a few seconds to see the result.",
-                                Toast.LENGTH_LONG
-                            ).show()
+                            Thread {
+                                Thread.sleep(2500)
+                                runOnUiThread {
+                                    syncStatus = SyncState.describe(this@MainActivity)
+                                }
+                            }.start()
                         },
                         modifier = Modifier.padding(innerPadding)
                     )
