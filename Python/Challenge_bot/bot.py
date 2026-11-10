@@ -1,7 +1,7 @@
 import os
 import logging
 from collections import Counter
-from datetime import datetime, timedelta, time, timezone
+from datetime import date, datetime, timedelta, time, timezone
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -42,6 +42,9 @@ SURVEY_TIME = time(0, 5, tzinfo=TZ)
 SURVEY_TIME_LABEL = f"{SURVEY_TIME:%H:%M} Europe/Amsterdam time"
 
 MINIMUM_SURVEY_SECONDS = 600
+DEMO_PERIOD_START = date(2026, 11, 6)
+DEMO_PERIOD_END = date(2026, 11, 10)
+DEMO_SEND_DATE = date(2026, 11, 12)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -379,12 +382,151 @@ def fetch_all_supabase_rows(table_name, columns, filters=None):
     return rows
 
 
-def calculate_weekly_stats(week_start):
-    """
-    Calculate weekly usage and questionnaire statistics.
+def most_common_response_value(responses: list[dict], field: str) -> str | None:
+    """Return the most common non-empty string, with stable tie-breaking."""
+    counts = Counter()
+    for response in responses:
+        value = response.get(field)
+        if isinstance(value, str) and value.strip():
+            counts[value.strip()] += 1
 
-    week_start must be a Monday.
-    Reporting period: Monday through Sunday, Amsterdam local dates.
+    if not counts:
+        return None
+
+    return min(counts, key=lambda value: (-counts[value], value.casefold()))
+
+
+def build_reflection_prompt(
+    top_vulnerable_context: str | None,
+    mismatch_count: int,
+    response_count: int,
+    period_label: str = "this week",
+) -> str:
+    """Create a neutral reflection prompt from the reporting-period data."""
+    if response_count == 0:
+        return (
+            f"I don't have completed check-ins for {period_label}. Would a shorter "
+            "check-in make it easier to reflect on how your plans and phone use fit together?"
+        )
+
+    if mismatch_count == 0:
+        return (
+            "I noticed your phone use generally matched your intention in this "
+            f"period's completed check-ins ({period_label}). "
+            "What helped that alignment feel possible?"
+        )
+
+    period_phrase = (
+        "this week"
+        if period_label == "this week"
+        else f"during {period_label}"
+    )
+    if top_vulnerable_context:
+        context_phrases = {
+            "short_break": "during short breaks",
+            "before_bed": "before bed",
+            "waiting": "while waiting",
+            "after_study": "after studying",
+            "bored": "when you felt bored",
+            "avoiding_task": "when avoiding a task",
+            "notification": "after receiving a notification",
+            "other": "in other situations",
+        }
+        readable_context = context_phrases.get(
+            top_vulnerable_context,
+            f"in the context '{top_vulnerable_context.replace('_', ' ')}'",
+        )
+        observed_period = (
+            period_phrase
+            if period_label == "this week"
+            else f"in the {period_label} check-ins"
+        )
+        return (
+            "I noticed your unplanned screen time was most often reported "
+            f"{readable_context} {observed_period}. Was that a necessary way to wind down, "
+            "or something you'd like to adjust?"
+        )
+
+    return (
+        f"I noticed some moments when your plans changed {period_phrase}. What was "
+        "happening around those moments, and how did the phone use fit into them?"
+    )
+
+
+def build_weekly_message(
+    insights: dict,
+    period_label: str = "this week",
+) -> str:
+    """Format stored insights as a concise, narrative Telegram message."""
+    intention_match_rate = insights["intention_match_rate"]
+    reflection_prompt = insights["reflection_prompt"]
+    is_weekly_summary = period_label == "this week"
+    summary_title = (
+        "weekly summary"
+        if is_weekly_summary
+        else f"summary for {period_label}"
+    )
+    period_lead = (
+        "This week"
+        if is_weekly_summary
+        else f"During {period_label}"
+    )
+
+    if intention_match_rate is None:
+        return (
+            f"Hi! Here is your {summary_title}.\n\n"
+            f"There were no completed check-ins for {period_label}, "
+            "so I can't compare "
+            "your intentions with how you used your phone.\n\n"
+            f"{reflection_prompt}"
+        )
+
+    percentage = f"{intention_match_rate * 100:.1f}".rstrip("0").rstrip(".")
+    vulnerable_contexts = insights["vulnerable_contexts"]
+
+    if not vulnerable_contexts and intention_match_rate == 1:
+        return (
+            f"Hi! Here is your {summary_title}.\n\n"
+            f"{period_lead}, you maintained your original intention in "
+            f"{percentage}% of your sessions.\n\n"
+            "No changes between intention and phone use were reported in your "
+            "completed sessions.\n\n"
+            f"{reflection_prompt}"
+        )
+
+    top_vulnerable_context = (
+        vulnerable_contexts[0]["context"]
+        if vulnerable_contexts
+        else None
+    )
+    if top_vulnerable_context:
+        top_vulnerable_context = top_vulnerable_context.replace("_", " ")
+    else:
+        top_vulnerable_context = "not recorded"
+
+    most_displaced_intention = (
+        insights["most_displaced_intention"] or "not recorded"
+    )
+    frequent_actual_activity = (
+        insights["frequent_actual_activity"] or "not recorded"
+    )
+
+    return f"""Hi! Here is your {summary_title}.
+
+{period_lead}, you maintained your original intention in {percentage}% of your sessions.
+
+Among the moments when your plans changed, you most often postponed '{most_displaced_intention}' and reported '{frequent_actual_activity}' as the activity you did instead. These changes were most often reported in the context '{top_vulnerable_context}'.
+
+{reflection_prompt}"""
+
+
+def calculate_weekly_stats(week_start, week_end=None):
+    """
+    Calculate usage and questionnaire statistics for a date range.
+
+    With no week_end, week_start must be a Monday and the complete
+    Monday-through-Sunday week is calculated. Supplying week_end allows
+    a custom inclusive date range for one-off partial-period summaries.
     """
 
     if isinstance(week_start, str):
@@ -392,13 +534,30 @@ def calculate_weekly_stats(week_start):
             week_start, "%Y-%m-%d"
         ).date()
 
-    if week_start.weekday() != 0:
-        raise ValueError("week_start must be a Monday.")
-
-    week_end = week_start + timedelta(days=6)
+    if week_end is None:
+        if week_start.weekday() != 0:
+            raise ValueError("week_start must be a Monday.")
+        week_end = week_start + timedelta(days=6)
+        period_label = "this week"
+    else:
+        if isinstance(week_end, str):
+            week_end = datetime.strptime(
+                week_end, "%Y-%m-%d"
+            ).date()
+        if week_end < week_start:
+            raise ValueError("week_end must be on or after week_start.")
+        period_label = (
+            f"{week_start.strftime('%B')} {week_start.day}-"
+            f"{week_end.day}"
+            if week_start.month == week_end.month
+            else (
+                f"{week_start.strftime('%B')} {week_start.day} to "
+                f"{week_end.strftime('%B')} {week_end.day}"
+            )
+        )
 
     logger.info(
-        "Calculating weekly statistics from %s to %s",
+        "Calculating reporting-period statistics from %s to %s",
         week_start,
         week_end,
     )
@@ -497,84 +656,66 @@ def calculate_weekly_stats(week_start):
             completed_responses.append(response)
 
     # ---------------------------------------------------------
-    # 3. Calculate mismatch count and displaced seconds
+    # 3. Calculate intention alignment and mismatch patterns
     # ---------------------------------------------------------
 
-    mismatch_count = 0
+    valid_responses = [
+        response
+        for response in completed_responses
+        if isinstance(response.get("matched_intention"), bool)
+    ]
+    mismatch_responses = [
+        response
+        for response in valid_responses
+        if response.get("matched_intention") is False
+    ]
+    mismatch_count = len(mismatch_responses)
     displaced_seconds = 0.0
 
-    intended_activities = Counter()
-    actual_activities = Counter()
-    reasons = Counter()
+    for response in mismatch_responses:
+        session_id = response.get("session_id")
+        merged_id = response.get("merged_id")
 
-    for response in completed_responses:
-
-        intended = response.get("intended_activity")
-        actual = response.get("actual_activity")
-        reason = response.get("reason")
-
-        if intended:
-            intended_activities[intended] += 1
-
-        if actual:
-            actual_activities[actual] += 1
-
-        if reason:
-            reasons[reason] += 1
-
-        # The bot stores matched_intention as a Boolean.
-        if response.get("matched_intention") is False:
-            mismatch_count += 1
-
-            session_id = response.get("session_id")
-            merged_id = response.get("merged_id")
-
-            if session_id:
-                displaced_seconds += session_durations.get(
-                    session_id, 0.0
-                )
-
-            elif merged_id:
-                displaced_seconds += merged_durations.get(
-                    merged_id, 0.0
-                )
-
-    # ---------------------------------------------------------
-    # 4. Calculate percentages and most common activities
-    # ---------------------------------------------------------
-
-    completed_count = len(completed_responses)
+        if session_id:
+            displaced_seconds += session_durations.get(session_id, 0.0)
+        elif merged_id:
+            displaced_seconds += merged_durations.get(merged_id, 0.0)
 
     match_count = sum(
-        1
-        for response in completed_responses
-        if response.get("matched_intention") is True
+        response.get("matched_intention") is True
+        for response in valid_responses
+    )
+    intention_match_rate = (
+        match_count / len(valid_responses)
+        if valid_responses
+        else None
     )
 
-    match_percentage = (
-        round(match_count / completed_count * 100, 2)
-        if completed_count > 0
-        else 0.0
+    context_counts = Counter(
+        response["context"]
+        for response in mismatch_responses
+        if isinstance(response.get("context"), str)
+        and response["context"].strip()
     )
-
-    most_used_app = (
-        app_usage.most_common(1)[0][0]
-        if app_usage else None
+    vulnerable_contexts = [
+        {"context": context, "mismatch_count": count}
+        for context, count in sorted(
+            context_counts.items(),
+            key=lambda item: (-item[1], item[0].casefold()),
+        )
+    ]
+    top_vulnerable_context = (
+        vulnerable_contexts[0]["context"]
+        if vulnerable_contexts
+        else None
     )
-
-    most_common_intended = (
-        intended_activities.most_common(1)[0][0]
-        if intended_activities else None
+    most_displaced_intention = most_common_response_value(
+        mismatch_responses,
+        "intended_activity",
     )
-
-    most_common_actual = (
-        actual_activities.most_common(1)[0][0]
-        if actual_activities else None
-    )
-
-    most_common_reason = (
-        reasons.most_common(1)[0][0]
-        if reasons else None
+    frequent_actual_activity = most_common_response_value(
+        mismatch_responses,
+        "actual_activity",
     )
 
     # ---------------------------------------------------------
@@ -582,21 +723,20 @@ def calculate_weekly_stats(week_start):
     # ---------------------------------------------------------
 
     insights = {
-        "week_end": str(week_end),
-        "completed_surveys": completed_count,
-        "matched_intentions": match_count,
-        "intention_match_percentage": match_percentage,
-        "most_used_app": most_used_app,
-        "most_common_intended_activity": most_common_intended,
-        "most_common_actual_activity": most_common_actual,
-        "most_common_reason": most_common_reason,
-        "top_apps": [
-            {
-                "app_name": app,
-                "usage_seconds": round(seconds),
-            }
-            for app, seconds in app_usage.most_common(5)
-        ],
+        "intention_match_rate": (
+            round(intention_match_rate, 4)
+            if intention_match_rate is not None
+            else None
+        ),
+        "vulnerable_contexts": vulnerable_contexts,
+        "most_displaced_intention": most_displaced_intention,
+        "frequent_actual_activity": frequent_actual_activity,
+        "reflection_prompt": build_reflection_prompt(
+            top_vulnerable_context,
+            mismatch_count,
+            len(valid_responses),
+            period_label,
+        ),
     }
 
     # ---------------------------------------------------------
@@ -993,6 +1133,58 @@ async def cancel(
     )
     return ConversationHandler.END
 
+
+async def send_demo_summary(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> int:
+    """Send the one-time November 6-10 demo summary on November 12."""
+    chat = update.effective_chat
+    message = update.effective_message
+    if chat is None or chat.id != CHAT_ID or message is None:
+        return ConversationHandler.END
+
+    if datetime.now(TZ).date() != DEMO_SEND_DATE:
+        await message.reply_text(
+            "This one-time demo summary can be sent on November 12, 2026."
+        )
+        return ConversationHandler.END
+
+    if context.application.bot_data.get("demo_summary_sent"):
+        await message.reply_text(
+            "The one-time demo summary has already been sent."
+        )
+        return ConversationHandler.END
+
+    try:
+        stats = calculate_weekly_stats(
+            DEMO_PERIOD_START,
+            DEMO_PERIOD_END,
+        )
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=build_weekly_message(
+                stats["insights"],
+                period_label="November 6-10",
+            ),
+        )
+    except Exception:
+        logger.exception("Failed to send the one-time demo summary")
+        await message.reply_text(
+            "I couldn't generate or send the demo summary. "
+            "The error was logged; please try again."
+        )
+        return ConversationHandler.END
+
+    context.application.bot_data["demo_summary_sent"] = True
+    logger.info(
+        "One-time demo summary sent for %s through %s",
+        DEMO_PERIOD_START,
+        DEMO_PERIOD_END,
+    )
+    return ConversationHandler.END
+
+
 async def generate_weekly_stats_job(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
@@ -1005,15 +1197,33 @@ async def generate_weekly_stats_job(
     last_week_start = this_monday - timedelta(days=7)
 
     try:
-        stats = generate_and_save_weekly_stats(last_week_start)
-
-        logger.info(
-            "Weekly statistics successfully saved for %s",
-            last_week_start,
-        )
-
+        saved_record = generate_and_save_weekly_stats(last_week_start)
     except Exception:
         logger.exception("Failed to generate weekly statistics")
+        return
+
+    logger.info(
+        "Weekly statistics successfully saved for %s",
+        last_week_start,
+    )
+
+    try:
+        insights = saved_record.get("insights")
+        if not isinstance(insights, dict):
+            raise RuntimeError(
+                f"Saved weekly statistics for {last_week_start} "
+                "do not contain a valid insights object."
+            )
+
+        await context.bot.send_message(
+            chat_id=CHAT_ID,
+            text=build_weekly_message(insights),
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send the weekly summary for %s",
+            last_week_start,
+        )
 
 # ---------------------------------------------------------------------
 # Main
@@ -1029,7 +1239,7 @@ def main() -> None:
         time=SURVEY_TIME,
         name="daily_session_survey",
     )
-    # Weekly statistics every Monday
+    # Existing weekly report schedule: Tuesday at 00:15 Europe/Amsterdam.
     app.job_queue.run_daily(
         generate_weekly_stats_job,
         time=time(hour=0, minute=15, tzinfo=TZ),
@@ -1040,6 +1250,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CommandHandler("retry", retry_save))
+    app.add_handler(CommandHandler("send_demo_summary", send_demo_summary))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, receive_answer))
 
     app.run_polling()
