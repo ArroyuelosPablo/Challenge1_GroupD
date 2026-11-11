@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="A public, reflective view of phone-use routines and intentions."
+    />
+    <meta name="theme-color" content="#f5f4ef" />
+    <title>Daylight — Screen-use reflections</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./config.js"></script>
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Daylight home">
+          <span class="brand-mark" aria-hidden="true">d</span>
+          <span>daylight</span>
+        </a>
+        <div class="topbar-right">
+          <span id="connection-status" class="connection-status">
+            <span class="status-dot"></span>
+            <span id="connection-label">Connecting to live data</span>
+          </span>
+        </div>
+      </header>
+
+      <main>
+        <section id="dashboard-view" class="dashboard">
+          <div class="welcome-row">
+            <div>
+              <p class="eyebrow" id="view-eyebrow">Your patterns, at your pace</p>
+              <h1 id="dashboard-title">A clearer view of your days.</h1>
+              <p class="intro">
+                Notice the context around your phone use, without judging it.
+              </p>
+            </div>
+            <div class="public-banner" role="note">
+              <span class="status-dot"></span>
+              Public data · anyone can access these records
+            </div>
+          </div>
+
+          <nav class="view-tabs" aria-label="Choose dashboard view">
+            <button class="view-tab active" data-view="daily" type="button">Day by day</button>
+            <button class="view-tab" data-view="weekly" type="button">Weekly reflections</button>
+          </nav>
+
+          <section id="daily-view" class="view-panel">
+            <div class="section-toolbar">
+              <div>
+                <p class="eyebrow">Daily view</p>
+                <h2 id="daily-heading">Your day</h2>
+              </div>
+              <div class="date-control">
+                <button id="previous-day" class="icon-button" type="button" aria-label="Previous day">←</button>
+                <input id="day-picker" type="date" aria-label="Choose a day" />
+                <button id="next-day" class="icon-button" type="button" aria-label="Next day">→</button>
+              </div>
+            </div>
+
+            <div id="daily-content" class="content-stack"></div>
+          </section>
+
+          <section id="weekly-view" class="view-panel hidden">
+            <div class="section-toolbar">
+              <div>
+                <p class="eyebrow">A wider lens</p>
+                <h2 id="weekly-heading">Your weekly reflections</h2>
+              </div>
+              <div class="date-control">
+                <button id="previous-week" class="icon-button" type="button" aria-label="Previous week">←</button>
+                <input id="week-picker" type="date" aria-label="Choose a week" />
+                <button id="next-week" class="icon-button" type="button" aria-label="Next week">→</button>
+              </div>
+            </div>
+
+            <div id="weekly-content" class="content-stack"></div>
+          </section>
+          <footer class="privacy-footer">
+            <span class="footer-flower" aria-hidden="true">✳</span>
+            This dashboard is here to support awareness, not to set a screen-time target.
+          </footer>
+        </section>
+      </main>
+
+      <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+    </div>
+  </body>
+</html>
