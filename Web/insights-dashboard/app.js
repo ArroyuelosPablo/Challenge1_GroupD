@@ -3,15 +3,14 @@
 
   const CONFIG = window.APP_CONFIG || {};
   const PAGE_SIZE = 1000;
+  const MIN_ACTIVITY_DATE = CONFIG.minimumActivityDate || "2026-11-06";
+  const TODAY = localDateString(new Date());
   const state = {
     currentView: "daily",
     requestNumber: 0,
-    sessions: [],
-    responses: [],
   };
 
   const elements = {
-    connectionLabel: document.querySelector("#connection-label"),
     tabs: [...document.querySelectorAll(".view-tab")],
     dailyView: document.querySelector("#daily-view"),
     weeklyView: document.querySelector("#weekly-view"),
@@ -47,6 +46,24 @@
     const date = dateFromInput(value);
     date.setDate(date.getDate() + days);
     return localDateString(date);
+  }
+
+  function clampDate(value, minimum = MIN_ACTIVITY_DATE, maximum = TODAY) {
+    if (!value || value < minimum) return minimum;
+    return value > maximum ? maximum : value;
+  }
+
+  function weekStartFor(value) {
+    const monday = localDateString(mondayOf(dateFromInput(value)));
+    return monday < MIN_ACTIVITY_DATE ? MIN_ACTIVITY_DATE : monday;
+  }
+
+  function weekRangeFor(value) {
+    const monday = localDateString(mondayOf(dateFromInput(value)));
+    return {
+      start: monday < MIN_ACTIVITY_DATE ? MIN_ACTIVITY_DATE : monday,
+      end: clampDate(addDays(monday, 6)),
+    };
   }
 
   function formatDate(value, options = { weekday: "long", month: "long", day: "numeric" }) {
@@ -175,18 +192,37 @@
     return phrases[context] || `in the context “${displayName(context)}”`;
   }
 
-  function reflectionText(summary, period) {
+  function observationText(summary) {
     if (!summary.responseCount) {
-      return `There are no completed check-ins for ${period}. A quieter week is not a problem; it simply means there is less to compare.`;
+      return "There are no check-ins with a recorded intention match linked to this period yet, so there is not enough information to compare intentions with reported activities.";
     }
+    const alignment = `${summary.matchedCount} of ${summary.responseCount} answered check-ins matched the stated intention (${formatRate(summary.matchRate)}).`;
     if (!summary.mismatchCount) {
-      return `In the completed check-ins for ${period}, your phone use matched your intention. What helped that alignment feel possible?`;
+      return `${alignment} No changes between intended and reported activities were recorded in these check-ins.`;
     }
     const topContext = getTop(summary.contexts);
-    if (topContext) {
-      return `In these check-ins, changes between plans and phone use were reported most often ${contextPhrase(topContext)}. What was happening in those moments, and how did the phone use fit in?`;
+    const intention = getTop(summary.intentions);
+    const actual = getTop(summary.actualActivities);
+    const context = topContext
+      ? ` The most common context was ${contextPhrase(topContext)}.`
+      : "";
+    const activity = intention && actual
+      ? ` '${displayName(intention)}' was the most frequently postponed intention, while '${displayName(actual)}' was the most common reported activity.`
+      : "";
+    return `${alignment} In ${summary.mismatchCount} check-ins, the reported activity differed from the intention.${context}${activity}`;
+  }
+
+  function reflectionQuestion(summary) {
+    if (!summary.responseCount) {
+      return "When more check-ins include an intention match, this view can help you reflect on how those moments fit into your day.";
     }
-    return `Some check-ins showed a change between your plan and phone use. What was happening in those moments, and how did the phone use fit in?`;
+    if (!summary.mismatchCount) {
+      return "What helped your phone use align with your intention in these moments?";
+    }
+    const topContext = getTop(summary.contexts);
+    return topContext
+      ? `What was happening ${contextPhrase(topContext)}, and how did the phone use fit into that moment?`
+      : "What was happening in the moments where your intention and reported activity differed?";
   }
 
   function showToast(message) {
@@ -201,7 +237,11 @@
 
   function setView(name) {
     state.currentView = name;
-    elements.tabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.view === name));
+    elements.tabs.forEach((tab) => {
+      const selected = tab.dataset.view === name;
+      tab.classList.toggle("active", selected);
+      tab.setAttribute("aria-pressed", String(selected));
+    });
     elements.dailyView.classList.toggle("hidden", name !== "daily");
     elements.weeklyView.classList.toggle("hidden", name !== "weekly");
     loadCurrentSelection();
@@ -257,18 +297,18 @@
       }
     }
     return `<div class="response-table-wrap"><table class="response-table">
-      <thead><tr><th>Time</th><th>Intended</th><th>Actual</th><th>Context</th><th>Reflection</th></tr></thead>
+      <thead><tr><th>Time</th><th>Intended</th><th>Actual</th><th>Context</th><th>Match to plan</th></tr></thead>
       <tbody>${responses.map((response) => {
-        const linkedSession = response.session_id
-          ? sessionById.get(response.session_id)
-          : sessionByMergedId.get(response.merged_id);
-        const time = linkedSession?.start_time
+        const linkedSession = sessionById.get(response.session_id)
+          || sessionByMergedId.get(response.merged_id);
+        const timeValue = response.response_time || linkedSession?.start_time;
+        const time = timeValue
           ? new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" })
-            .format(new Date(linkedSession.start_time))
+            .format(new Date(timeValue))
           : "—";
         const matched = response.matched_intention === true;
-        const status = matched ? "Aligned" : response.matched_intention === false ? "Changed" : "Not answered";
-        const statusClass = matched ? "" : "mismatch";
+        const status = matched ? "Matched" : response.matched_intention === false ? "Changed" : "Not recorded";
+        const statusClass = response.matched_intention === false ? "mismatch" : "";
         return `<tr>
           <td>${escapeHtml(time)}</td>
           <td>${escapeHtml(displayName(response.intended_activity))}</td>
@@ -290,8 +330,6 @@
       );
       return;
     }
-    const topIntention = getTop(summary.intentions);
-    const topActual = getTop(summary.actualActivities);
     const dayLabel = formatDate(date, { month: "long", day: "numeric" });
     const apps = summary.apps.slice(0, 7).map((app) => ({
       name: app.name,
@@ -301,10 +339,15 @@
     elements.dailyContent.innerHTML = `
       <div class="metric-grid">
         ${metricCard("Recorded app time", readableDuration(summary.totalSeconds), "From collected app sessions")}
-        ${metricCard("Recorded sessions", String(summary.sessionCount), "Sessions in the selected day")}
-        ${metricCard("Completed check-ins", String(summary.responseCount), "Responses linked to these sessions")}
-        ${metricCard("Matched intention", formatRate(summary.matchRate), summary.responseCount ? `${summary.matchedCount} of ${summary.responseCount} check-ins` : "No completed check-ins")}
+        ${metricCard("Answered check-ins", String(summary.responseCount), "Responses with a recorded intention match")}
+        ${metricCard("Plans aligned", formatRate(summary.matchRate), summary.responseCount ? `${summary.matchedCount} of ${summary.responseCount} check-ins` : "No answered check-ins")}
+        ${metricCard("Plans changed", String(summary.mismatchCount), summary.responseCount ? `Of ${summary.responseCount} answered check-ins` : "No answered check-ins")}
       </div>
+      <article class="reflection-card">
+        <p class="eyebrow">What the check-ins show</p>
+        <p class="reflection-text">${escapeHtml(observationText(summary))}</p>
+        <p class="weekly-question">${escapeHtml(reflectionQuestion(summary))}</p>
+      </article>
       <div class="two-column">
         <article class="panel">
           <div class="panel-heading"><div><h3>App time</h3><p>Recorded use by app. This is context, not a target.</p></div></div>
@@ -319,27 +362,17 @@
         <div class="panel-heading"><div><h3>Check-ins for ${escapeHtml(dayLabel)}</h3><p>Responses connected to the recorded sessions for this day.</p></div></div>
         ${responseTable(responses, sessions)}
       </article>
-      <article class="reflection-card">
-        <p class="eyebrow">A gentle reflection</p>
-        <p class="reflection-text">${escapeHtml(reflectionText(summary, dayLabel))}</p>
-      </article>
-      ${topIntention && topActual && summary.mismatchCount
-        ? `<p class="small-observation">In the changed check-ins, <strong>${escapeHtml(displayName(topIntention))}</strong> was the most frequently postponed intention, while <strong>${escapeHtml(displayName(topActual))}</strong> was the most frequent reported activity.</p>`
-        : ""}
     `;
   }
 
-  function renderWeekly(weekStart, sessions, responses) {
-    const weekEnd = addDays(weekStart, 6);
+  function renderWeekly(range, sessions, responses) {
+    const { start: weekStart, end: weekEnd } = range;
     elements.weeklyHeading.textContent =
       `${formatDate(weekStart, { month: "short", day: "numeric" })} – ${formatDate(weekEnd, { month: "short", day: "numeric", year: "numeric" })}`;
     const summary = summarize(sessions, responses);
-    const intention = getTop(summary.intentions);
-    const actual = getTop(summary.actualActivities);
     const period = `${formatDate(weekStart, { month: "long", day: "numeric" })}–${formatDate(weekEnd, { month: "long", day: "numeric" })}`;
     const daily = [];
-    for (let index = 0; index < 7; index += 1) {
-      const date = addDays(weekStart, index);
+    for (let date = weekStart; date <= weekEnd; date = addDays(date, 1)) {
       const daySessions = sessions.filter((session) => session.activity_date === date);
       const sessionIds = new Set(daySessions.map((session) => session.id));
       const mergedIds = new Set(daySessions.map((session) => session.merged_id).filter(Boolean));
@@ -361,23 +394,20 @@
       </div>`;
     }).join("")}</div>`;
 
-    const reflection = summary.mismatchCount
-      ? `Across the completed check-ins, '${displayName(intention || "not recorded")}' was the most frequently postponed intention. '${displayName(actual || "not recorded")}' was the most frequent activity reported instead.`
-      : "This week has no completed check-ins reporting a change between intention and activity.";
-    const topContext = getTop(summary.contexts);
-    const contextExplanation = topContext
-      ? `The context mentioned most often in changed check-ins was ${contextPhrase(topContext)}.`
-      : "There is no repeated mismatch context to highlight from this week's check-ins.";
-
     elements.weeklyContent.innerHTML = `
       <div class="metric-grid">
-        ${metricCard("Recorded app time", readableDuration(summary.totalSeconds), "Sum of collected sessions for the week")}
-        ${metricCard("Recorded sessions", String(summary.sessionCount), "Across the seven selected dates")}
-        ${metricCard("Completed check-ins", String(summary.responseCount), "Responses linked to these sessions")}
-        ${metricCard("Matched intention", formatRate(summary.matchRate), summary.responseCount ? `${summary.matchedCount} of ${summary.responseCount} check-ins` : "No completed check-ins")}
+        ${metricCard("Recorded app time", readableDuration(summary.totalSeconds), "Collected app sessions in this period")}
+        ${metricCard("Answered check-ins", String(summary.responseCount), "Responses with a recorded intention match")}
+        ${metricCard("Plans aligned", formatRate(summary.matchRate), summary.responseCount ? `${summary.matchedCount} of ${summary.responseCount} check-ins` : "No answered check-ins")}
+        ${metricCard("Plans changed", String(summary.mismatchCount), summary.responseCount ? `Of ${summary.responseCount} answered check-ins` : "No answered check-ins")}
       </div>
+      <article class="reflection-card">
+        <p class="eyebrow">What the check-ins show</p>
+        <p class="reflection-text">${escapeHtml(observationText(summary))}</p>
+        <p class="weekly-question">${escapeHtml(reflectionQuestion(summary))}</p>
+      </article>
       <article class="panel">
-        <div class="panel-heading"><div><h3>Recorded app time, day by day</h3><p>Empty days mean no sessions were returned for that date.</p></div></div>
+        <div class="panel-heading"><div><h3>Recorded app time by day</h3><p>Only dates in this period are shown; days without bars had no recorded sessions.</p></div></div>
         ${chart}
       </article>
       <div class="two-column">
@@ -386,15 +416,10 @@
           ${contextList(summary.contexts)}
         </article>
         <article class="panel">
-          <div class="panel-heading"><div><h3>Most frequent app activity</h3><p>Collected app-session duration for ${escapeHtml(period)}.</p></div></div>
+          <div class="panel-heading"><div><h3>Apps by recorded time</h3><p>Collected app-session duration for ${escapeHtml(period)}.</p></div></div>
           ${barList(summary.apps.slice(0, 6), readableDuration, "No app sessions were recorded for this week.")}
         </article>
       </div>
-      <article class="reflection-card">
-        <p class="eyebrow">What the check-ins show</p>
-        <p class="reflection-text">${escapeHtml(reflection)} ${escapeHtml(contextExplanation)}</p>
-        <p class="weekly-question">${escapeHtml(reflectionText(summary, period))}</p>
-      </article>
       <article class="panel">
         <div class="panel-heading"><div><h3>Check-ins this week</h3><p>Detailed responses linked to the selected week's sessions.</p></div></div>
         ${responseTable(responses, sessions)}
@@ -449,7 +474,7 @@
   async function fetchResponses(sessions) {
     const sessionIds = [...new Set(sessions.map((session) => session.id).filter(Boolean))];
     const mergedIds = [...new Set(sessions.map((session) => session.merged_id).filter(Boolean))];
-    const columns = "id,session_id,merged_id,intended_activity,actual_activity,context,matched_intention,completed";
+    const columns = "id,session_id,merged_id,intended_activity,actual_activity,context,matched_intention,completed,response_time";
     const requests = [];
     for (const ids of chunks(sessionIds, 100)) {
       requests.push(fetchAllRows("activity_responses", columns, {
@@ -468,20 +493,35 @@
     for (const response of batches.flat()) {
       byId.set(response.id, response);
     }
+    const sessionById = new Map(sessions.map((session) => [session.id, session]));
+    const sessionByMergedId = new Map();
+    for (const session of sessions) {
+      if (session.merged_id && !sessionByMergedId.has(session.merged_id)) {
+        sessionByMergedId.set(session.merged_id, session);
+      }
+    }
+    const getSession = (response) => sessionById.get(response.session_id)
+      || sessionByMergedId.get(response.merged_id);
     return [...byId.values()].sort((a, b) => {
-      const aSession = sessions.find((session) => session.id === a.session_id)
-        || sessions.find((session) => session.merged_id === a.merged_id);
-      const bSession = sessions.find((session) => session.id === b.session_id)
-        || sessions.find((session) => session.merged_id === b.merged_id);
-      return Date.parse(aSession?.start_time || "") - Date.parse(bSession?.start_time || "");
+      const aTime = Date.parse(a.response_time || getSession(a)?.start_time || "");
+      const bTime = Date.parse(b.response_time || getSession(b)?.start_time || "");
+      return (Number.isNaN(aTime) ? 0 : aTime) - (Number.isNaN(bTime) ? 0 : bTime);
     });
   }
 
   async function fetchPeriod(start, end) {
+    if (end < MIN_ACTIVITY_DATE) return { sessions: [], responses: [] };
+    const boundedStart = start < MIN_ACTIVITY_DATE ? MIN_ACTIVITY_DATE : start;
+    const boundedEnd = end > TODAY ? TODAY : end;
+    if (boundedStart > boundedEnd) return { sessions: [], responses: [] };
     const sessions = await fetchAllRows(
       "usage_sessions",
       "id,app_name,package_name,start_time,end_time,duration_seconds,merged_id,activity_date",
-      { activity_date: `gte.${start}`, and: `(activity_date.lte.${end})` },
+      {
+        activity_date: `gte.${boundedStart}`,
+        and: `(activity_date.lte.${boundedEnd})`,
+        order: "activity_date.asc,start_time.asc,id.asc",
+      },
     );
     const responses = await fetchResponses(sessions);
     return { sessions, responses };
@@ -489,30 +529,35 @@
 
   async function fetchLatestActivityDate() {
     const sessions = await fetchAllRows("usage_sessions", "activity_date", {
+      activity_date: `gte.${MIN_ACTIVITY_DATE}`,
+      and: `(activity_date.lte.${TODAY})`,
       order: "activity_date.desc",
       limit: "1",
     });
-    return sessions[0]?.activity_date || localDateString(new Date());
+    return sessions[0]?.activity_date || MIN_ACTIVITY_DATE;
   }
 
   async function loadCurrentSelection() {
     const requestNumber = ++state.requestNumber;
     const isWeekly = state.currentView === "weekly";
-    const start = isWeekly ? elements.weekPicker.value : elements.dayPicker.value;
-    const end = isWeekly ? addDays(start, 6) : start;
+    const selectedDate = isWeekly
+      ? clampDate(elements.weekPicker.value)
+      : clampDate(elements.dayPicker.value);
+    if (isWeekly) elements.weekPicker.value = weekStartFor(selectedDate);
+    else elements.dayPicker.value = selectedDate;
+    const range = isWeekly ? weekRangeFor(selectedDate) : { start: selectedDate, end: selectedDate };
+    const { start, end } = range;
     const target = isWeekly ? elements.weeklyContent : elements.dailyContent;
+    updateNavigation();
     target.innerHTML = '<div class="loading-state">Gathering your check-ins and session details…</div>';
 
     try {
       const result = await fetchPeriod(start, end);
       if (requestNumber !== state.requestNumber) return;
-      state.sessions = result.sessions;
-      state.responses = result.responses;
-      if (isWeekly) renderWeekly(start, result.sessions, result.responses);
+      if (isWeekly) renderWeekly(range, result.sessions, result.responses);
       else renderDaily(start, result.sessions, result.responses);
     } catch (error) {
       if (requestNumber !== state.requestNumber) return;
-      elements.connectionLabel.textContent = "Connection issue";
       target.innerHTML = renderEmpty(
         "Could not load this period",
         `${error.message} Check config.js and anonymous read access for usage_sessions and activity_responses.`,
@@ -521,28 +566,47 @@
     }
   }
 
+  function updateNavigation() {
+    const previousDay = document.querySelector("#previous-day");
+    const nextDay = document.querySelector("#next-day");
+    const previousWeek = document.querySelector("#previous-week");
+    const nextWeek = document.querySelector("#next-week");
+    previousDay.disabled = elements.dayPicker.value <= MIN_ACTIVITY_DATE;
+    nextDay.disabled = elements.dayPicker.value >= TODAY;
+    previousWeek.disabled = elements.weekPicker.value <= MIN_ACTIVITY_DATE;
+    nextWeek.disabled = elements.weekPicker.value >= weekStartFor(TODAY);
+  }
+
+  elements.dayPicker.min = MIN_ACTIVITY_DATE;
+  elements.dayPicker.max = TODAY;
+  elements.weekPicker.min = MIN_ACTIVITY_DATE;
+  elements.weekPicker.max = TODAY;
+
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => setView(tab.dataset.view));
   });
-  elements.dayPicker.addEventListener("change", loadCurrentSelection);
+  elements.dayPicker.addEventListener("change", () => {
+    elements.dayPicker.value = clampDate(elements.dayPicker.value);
+    loadCurrentSelection();
+  });
   elements.weekPicker.addEventListener("change", () => {
-    elements.weekPicker.value = localDateString(mondayOf(dateFromInput(elements.weekPicker.value)));
+    elements.weekPicker.value = weekStartFor(clampDate(elements.weekPicker.value));
     loadCurrentSelection();
   });
   document.querySelector("#previous-day").addEventListener("click", () => {
-    elements.dayPicker.value = addDays(elements.dayPicker.value, -1);
+    elements.dayPicker.value = clampDate(addDays(elements.dayPicker.value, -1));
     loadCurrentSelection();
   });
   document.querySelector("#next-day").addEventListener("click", () => {
-    elements.dayPicker.value = addDays(elements.dayPicker.value, 1);
+    elements.dayPicker.value = clampDate(addDays(elements.dayPicker.value, 1));
     loadCurrentSelection();
   });
   document.querySelector("#previous-week").addEventListener("click", () => {
-    elements.weekPicker.value = addDays(elements.weekPicker.value, -7);
+    elements.weekPicker.value = weekStartFor(clampDate(addDays(elements.weekPicker.value, -7)));
     loadCurrentSelection();
   });
   document.querySelector("#next-week").addEventListener("click", () => {
-    elements.weekPicker.value = addDays(elements.weekPicker.value, 7);
+    elements.weekPicker.value = weekStartFor(clampDate(addDays(elements.weekPicker.value, 7)));
     loadCurrentSelection();
   });
 
@@ -550,11 +614,10 @@
     try {
       const latestDate = await fetchLatestActivityDate();
       elements.dayPicker.value = latestDate;
-      elements.weekPicker.value = localDateString(mondayOf(dateFromInput(latestDate)));
-      elements.connectionLabel.textContent = "Live public data";
+      elements.weekPicker.value = weekStartFor(latestDate);
+      updateNavigation();
       await loadCurrentSelection();
     } catch (error) {
-      elements.connectionLabel.textContent = "Connection issue";
       const message = `${error.message} Check config.js and anonymous read access in Supabase.`;
       elements.dailyContent.innerHTML = renderEmpty("Could not connect to Supabase", message);
       elements.weeklyContent.innerHTML = renderEmpty("Could not connect to Supabase", message);

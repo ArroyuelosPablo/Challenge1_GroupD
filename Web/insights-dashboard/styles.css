@@ -76,40 +76,6 @@ button {
   font-size: 18px;
 }
 
-.topbar-right,
-.connection-status {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.connection-status {
-  gap: 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  display: inline-block;
-  border-radius: 50%;
-  background: #7d9d7e;
-}
-
-.login-layout {
-  min-height: calc(100vh - 89px);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 390px;
-  align-items: center;
-  gap: clamp(40px, 9vw, 130px);
-  padding: 46px 7%;
-}
-
-.login-copy {
-  max-width: 490px;
-}
-
 .eyebrow {
   margin: 0 0 12px;
   color: var(--green);
@@ -132,7 +98,6 @@ h3 {
   font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
 }
 
-.login-copy h1,
 .welcome-row h1 {
   max-width: 600px;
   margin-bottom: 18px;
@@ -142,73 +107,10 @@ h3 {
   line-height: 1.08;
 }
 
-.intro {
-  max-width: 530px;
-  margin-bottom: 28px;
-  color: #707c73;
-  font-size: 16px;
-  line-height: 1.75;
-}
-
-.login-note {
-  max-width: 410px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-  color: #65756a;
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.login-note p {
-  margin: 0;
-}
-
-.note-icon,
 .footer-flower {
   color: var(--orange);
 }
 
-.login-card {
-  padding: 34px;
-  border: 1px solid rgb(57 75 61 / 8%);
-  border-radius: 18px;
-  background: var(--white);
-  box-shadow: var(--shadow);
-}
-
-.card-heading {
-  margin-bottom: 23px;
-}
-
-.card-heading h2 {
-  margin-bottom: 7px;
-  font-size: 26px;
-  letter-spacing: -1px;
-}
-
-.card-heading > p:last-child {
-  margin-bottom: 0;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-form {
-  display: grid;
-  gap: 9px;
-}
-
-form label {
-  margin-top: 7px;
-  color: #48584d;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-input[type="email"],
-input[type="password"],
 .date-control input {
   min-height: 45px;
   padding: 0 13px;
@@ -224,98 +126,13 @@ input:focus {
   box-shadow: 0 0 0 3px rgb(86 125 104 / 12%);
 }
 
-.button {
-  min-height: 41px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 15px;
-  border: 0;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  transition: background 150ms ease, transform 150ms ease;
-}
-
-.button:active,
 .icon-button:active,
 .view-tab:active {
   transform: translateY(1px);
 }
 
-.button-primary {
-  margin-top: 11px;
-  background: var(--green-dark);
-  color: #fff;
-}
-
-.button-primary:hover {
-  background: #294838;
-}
-
-.button-secondary {
-  border: 1px solid #dfe3d9;
-  background: transparent;
-  color: #4a6453;
-}
-
-.button-secondary:hover {
-  background: #f4f7f1;
-}
-
-.button-quiet {
-  min-height: 34px;
-  padding: 0 12px;
-  background: transparent;
-  color: var(--muted);
-}
-
-.button-quiet:hover {
-  background: #e9ece5;
-}
-
-.full-width {
-  width: 100%;
-}
-
-.login-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 19px 0 14px;
-  color: #a4aaa2;
-  font-size: 11px;
-}
-
-.login-divider::before,
-.login-divider::after {
-  height: 1px;
-  flex: 1;
-  background: var(--line);
-  content: "";
-}
-
-.demo-caption {
-  margin: 9px 0 0;
-  color: #8b948b;
-  font-size: 10px;
-  text-align: center;
-}
-
-.form-message {
-  min-height: 18px;
-  margin-top: 9px;
-  color: #a54f3c;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.form-message.success {
-  color: var(--green-dark);
-}
-
 .dashboard {
-  padding: 52px 0 30px;
+  padding: 46px 0 30px;
 }
 
 .welcome-row {
@@ -330,26 +147,10 @@ input:focus {
   font-size: clamp(34px, 4vw, 46px);
 }
 
-.welcome-row .intro {
-  margin-bottom: 0;
-  font-size: 14px;
-}
-
-.public-banner {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid #e8dfbf;
-  border-radius: 8px;
-  background: #faf6e9;
-  color: #7b704f;
-  font-size: 11px;
-}
-
-.public-banner .status-dot {
-  background: #c6a557;
+.dashboard-range {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .view-tabs {
@@ -426,6 +227,18 @@ input:focus {
   background: #edf2eb;
 }
 
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.icon-button:focus-visible,
+.view-tab:focus-visible,
+.date-control input:focus-visible {
+  outline: 3px solid rgb(86 125 104 / 35%);
+  outline-offset: 2px;
+}
+
 .content-stack {
   display: grid;
   gap: 17px;
@@ -463,7 +276,7 @@ input:focus {
 .metric-value {
   margin-bottom: 5px;
   font-family: Manrope, sans-serif;
-  font-size: 28px;
+  font-size: clamp(22px, 2.4vw, 28px);
   font-weight: 700;
   letter-spacing: -1px;
 }
@@ -580,7 +393,8 @@ input:focus {
 
 .reflection-card {
   padding: 22px 24px;
-  border: 1px solid #e5e7d8;
+  border: 1px solid #e0e6d9;
+  border-left: 4px solid #8daa8f;
   border-radius: 13px;
   background: #f0f1e7;
 }
@@ -591,6 +405,7 @@ input:focus {
 }
 
 .reflection-text {
+  max-width: 850px;
   margin: 0;
   color: #3f5043;
   font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
@@ -735,19 +550,6 @@ input:focus {
   text-align: center;
 }
 
-.small-observation {
-  margin: 0;
-  padding: 0 3px;
-  color: #78827b;
-  font-size: 11px;
-  line-height: 1.6;
-}
-
-.small-observation strong {
-  color: #526055;
-  font-weight: 600;
-}
-
 .weekly-question {
   margin: 13px 0 0;
   padding-top: 13px;
@@ -778,15 +580,13 @@ input:focus {
 }
 
 @media (max-width: 850px) {
-  .login-layout {
-    grid-template-columns: 1fr 350px;
-    gap: 40px;
-    padding-right: 2%;
-    padding-left: 2%;
-  }
-
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-card {
+    min-height: 120px;
+    padding: 16px;
   }
 }
 
@@ -799,29 +599,8 @@ input:focus {
     height: 70px;
   }
 
-  .login-layout {
-    min-height: auto;
-    grid-template-columns: 1fr;
-    gap: 28px;
-    padding: 54px 0 38px;
-  }
-
-  .login-copy h1 {
-    max-width: 500px;
-    font-size: 42px;
-  }
-
-  .login-card {
-    padding: 26px;
-  }
-
   .welcome-row {
     display: block;
-  }
-
-  .public-banner {
-    width: fit-content;
-    margin-top: 17px;
   }
 
   .dashboard {
