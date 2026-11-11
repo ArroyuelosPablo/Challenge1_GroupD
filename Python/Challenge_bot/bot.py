@@ -44,7 +44,7 @@ SURVEY_TIME_LABEL = f"{SURVEY_TIME:%H:%M} Europe/Amsterdam time"
 MINIMUM_SURVEY_SECONDS = 600
 DEMO_PERIOD_START = date(2026, 11, 6)
 DEMO_PERIOD_END = date(2026, 11, 10)
-DEMO_SEND_DATE = date(2026, 11, 12)
+DEMO_SEND_DATE = date(2026, 11, 11)
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -1138,7 +1138,7 @@ async def send_demo_summary(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
 ) -> int:
-    """Send the one-time November 6-10 demo summary on November 12."""
+    """Send the one-time November 6-10 demo summary on November 11."""
     chat = update.effective_chat
     message = update.effective_message
     if chat is None or chat.id != CHAT_ID or message is None:
@@ -1146,7 +1146,7 @@ async def send_demo_summary(
 
     if datetime.now(TZ).date() != DEMO_SEND_DATE:
         await message.reply_text(
-            "This one-time demo summary can be sent on November 12, 2026."
+            "This one-time demo summary can be sent on November 11, 2026."
         )
         return ConversationHandler.END
 
